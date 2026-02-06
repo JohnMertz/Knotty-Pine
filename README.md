@@ -6,7 +6,7 @@ Construction Grade Linux
 
 This tool does not yet build a working desktop image and is not appropriate for production at this time.
 
-## 🏝️ About 🏝️
+## 🌲 About 🌲
 
 This project seeks to produce an opinionated Linux desktop with the following components/features:
 
