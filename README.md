@@ -1,6 +1,6 @@
 # <img src="https://raw.githubusercontent.com/JohnMertz/Knotty-Pine/refs/heads/main/knotty-pine.svg" alt="Knotty Pine Logo" style="height:2em; vertical-align:middle;">Knotty Pine
 
-Construction Grade Linux
+Construction-Grade Linux
 
 ## 🚧 Under Construction 🚧
 

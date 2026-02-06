@@ -1,0 +1,43 @@
+---
+knotty-bootc-base: &knotty-bootc-base
+  cppFlags: []
+  description: "Construction-Grade Linux - Bootc Debian Desktop for Developers"
+  name: knotty-pine
+  org: johnmertz
+  registry: ghcr.io
+  repo: knotty-pine
+  product: knotty-pine
+  upstream: debian
+knotty-pine-13: &knotty-pine-13
+  # TODO: Implement a Renovate Regex
+  source: ghcr.io/frostyard/debian-bootc-core:latest
+  version: 13
+  default: true
+knotty-pine-14: &knotty-pine-14
+  # TODO: Implement a Renovate Regex
+  source: ghcr.io/frostyard/debian-bootc-core:latest
+  version: 14
+  default: false 
+
+defaults:
+  variant: knotty-pine
+  version: 13
+
+images:
+  knotty-pine-13:
+    !!merge <<: 
+      - *knotty-pine-13
+      - *knotty-bootc-base
+  knotty-pine-14:
+    !!merge <<:
+      - *knotty-pine-14
+      - *knotty-bootc-base
+  rechunker:
+    # TODO: Add Renovate Regex configuration
+    source: ghcr.io/hhd-dev/rechunk:v1.2.2@sha256:e799d89f9a9965b5b0e89941a9fc6eaab62e9d2d73a0bfb92e6a495be0706907
+  bootc-image-builder:
+    # TODO: Add Renovate Regex configuration
+    source: quay.io/centos-bootc/bootc-image-builder:latest
+  qemu:
+    # TODO: Add Renovate Regex configuration
+    source: ghcr.io/qemus/qemu:7.12@sha256:ab767a6b9c8cf527d521eee9686dce09933bc35599ee58be364eb8f3a03001ea
