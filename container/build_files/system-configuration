@@ -11,3 +11,5 @@ echo "#######################"
 setterm --foreground default
 
 echo -n 'knotty-pine' > /etc/hostname
+
+echo 'DPkg::Progress-Fancy "0";' > /etc/apt/apt.conf.d/99no-eipp

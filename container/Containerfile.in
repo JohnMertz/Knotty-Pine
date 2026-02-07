@@ -30,6 +30,9 @@ ARG CI=1
 /* Don't use SELinux features of OSTree */
 ENV OSTREE_SELINUX_ENABLE=0
 
+/* Copy in system configuration files */
+COPY system_files /
+
 /* Run Bash recipe for package installations */
 RUN --mount=type=cache,dst=/var/cache \
   --mount=type=tmpfs,dst=/var/log \

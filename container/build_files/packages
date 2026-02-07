@@ -15,45 +15,204 @@ echo "# Enabling Non-Free Repository..."
 setterm --foreground default
 
 sed -i 's/Components: main/Components: main non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+if [[ $VERSION == '13' ]]; then
+  setterm --foreground blue
+  echo "# Enabling backports..."
+  setterm --foreground default
+  sed -i 's/Suites: stable .*/Suites: stable stable-updates trixie-backports/' /etc/apt/sources.list.d/debian.sources
+fi
 
 setterm --foreground blue
 echo "# Installing dependencies..."
 setterm --foreground default
 
+ARCH_PKGS=""
+if [[ $ARCH == 'amd64' ]]; then
+  ARCH_PKGS="amd64-microcode
+  binutils-x86-64-linux-gnu
+  firmware-amd-graphics
+  firmware-intel-graphics
+  firmware-intel-misc
+  firmware-intel-sound
+  firmware-nvidia-graphics
+  fwupd-amd64-signed
+  intel-microcode
+  iucode-tool"
+fi
+
 apt-get update
 apt install --assume-yes --no-install-recommends --no-install-suggests \
+  $ARCH_PKGS \
+  aardvark-dns \
+  acpi \
+  acpitool \
+  alacritty \
+  alsa-topology-conf \
+  alsa-ucm-conf \
+  apparmor \
+  attr \
+  avahi-daemon \
+  bc \
+  bash-completion \
+  binutils-common \
   bind9 \
+  bolt \
+  btrfs-progs \
+  buildah \
   bzip2 \
   ca-certificates \
+  catatonit \
   console-data \
+  containernetworking-plugins \
+  containers-storage \
+  crun \
   cpanminus \
   cron \
+  cups \
+  cups-browsed \
+  cups-client \
+  cups-core-drivers \
+  cups-daemon \
+  cups-filters \
+  cups-filters-core-drivers \
+  cups-ipp-utils \
+  cups-pk-helper \
+  cups-ppdc \
+  cups-server-common \
   curl \
   debconf \
+  debian-archive-keyring \
+  debootstrap \
   distrobox \
+  distro-info \
+  distro-info-data \
+  dnsmasq-base \
   dnsutils \
+  dosfstools \
+  dracut \
+  efibootmgr \
+  exfatprogs \
+  e2fsprogs \
+  fastfetch \
   fdisk \
+  flatpak \
   file \
-  firmware-amd-graphics \
-  firmware-intel-graphics \
+  firmware-iwlwifi \
   firmware-linux \
   firmware-linux-free \
   firmware-linux-nonfree \
-  firmware-nvidia-graphics \
+  firmware-mediatek \
+  firmware-realtek \
+  frostyard-nbc \
+  fuse3 \
+  fuse-overlayfs \
+  fwupd \
+  gdisk \
   git \
+  git-lfs \
+  gnupg \
   gpg \
+  gphoto2 \
+  gvfs-backends \
+  gvfs-fuse \
   gzip \
+  hdparm \
+  iio-sensor-proxy \
+  ipp-usb \
+  iproute2 \
   iputils-ping \
+  iw \
+  iwd \
+  jq \
+  just \
   kbd \
+  keyboard-configuration \
+  klibc-utils \
+  kpartx \
+  kmod \
+  less \
+  libbinutils \
+  libbtrfs0t64 \
+  libcamera-v4l2 \
+  libfido2-1 \
+  libfido2-dev \
+  libgprofng0 \
+  libp11-kit0 \
+  libtss2-esys-3.0.2-0 \
+  libvirt-daemon-driver-lxc \
+  libvirt-daemon-driver-qemu \
+  libvirt-daemon-system-systemd \
   links \
+  locales \
+  locales-all \
+  low-memory-monitor \
   lsb-release \
+  lvm2 \
   lzma \
+  mesa-va-drivers \
+  mesa-vulkan-drivers \
+  mount \
+  network-manager \
+  network-manager-applet \
   net-tools \
+  nftables \
+  ntfs-3g \
   openssh-client \
   openssh-server \
   open-vm-tools \
+  passt \
+  pci.ids \
+  pcscd \
+  pipewire \
+  pipewire-v4l2 \
+  plymouth \
+  plymouth-themes \
+  plymouth-label \
+  podman \
+  podman-compose \
+  qemu-kvm \
+  qemu-utils \
+  qemu-system-gui \
+  qemu-system-modules-spice \
+  rsync \
+  rtkit \
+  sane-airscan \
+  sane-utils \
+  shim-signed \
   skopeo \
+  slirp4netns \
+  squashfs-tools \
+  sudo \
+  sway \
+  sway-notification-center \
+  systemd \
+  systemd-boot \
+  systemd-container \
+  systemd-cryptsetup \
+  systemd-resolved \
+  thunar \
+  thunar-volman \
+  tlp \
+  tlp-rdw \
+  tofi \
+  tpm2-tools \
+  unzip \
+  usb-modeswitch \
+  usb-modeswitch-data \
+  usbmuxd \
+  util-linux \
+  vim \
+  virt-manager \
+  virt-viewer \
+  wireless-regdb \
+  waybar \
+  wget \
+  xfsprogs \
+  xz-utils \
+  ydotool \
+  yq \
   zstd
+
 rm -rf /var/lib/apt/lists
 mkdir /var/lib/apt/lists
 apt-get clean -y
