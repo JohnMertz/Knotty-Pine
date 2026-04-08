@@ -5,7 +5,9 @@ podman := require('podman')
 podman-remote := which('podman-remote') || podman + ' --remote'
 builddir := shell('mkdir -p $1 && echo $1', absolute_path(env('KNOTTY_BUILD', 'build')))
 image := "knotty-pine"
+variant := env('KNOTTY_VARIANT', shell('yq ".defaults.variant" images.yaml'))
 version := env('KNOTTY_VERSION', shell('yq ".defaults.version" images.yaml'))
+selinux := path_exists('/sys/fs/selinux')
 
 # Source Images
 
@@ -22,17 +24,18 @@ PRIVKEY := env('HOME') / '.local/share/containers/podman/machine/machine'
 PUBKEY := PRIVKEY + '.pub'
 [private]
 default-inputs := '
+: ${variant:=' + variant + '}
 : ${version:=' + version + '}
 '
 [private]
-get-names := just + ' check-valid-image $version
+get-names := just + ' check-valid-image $variant $version
 function image-get() {
     if [ -z "$1" ]; then
       echo "image-get: requires a key argument"
       exit 1
     fi
     KEY="${1}"
-    data=$(IFS="" yq -Mr "explode(.)|.images|.' + image + '-$version|.$KEY" images.yaml)
+    data=$(IFS="" yq -Mr "explode(.)|.images|.$variant-$version|.$KEY" images.yaml)
     echo ${data}
 }
 source_image="$(image-get source)"
@@ -54,7 +57,7 @@ image_tag="$image_product-$image_version"
 '
 [private]
 build-missing := '
-cmd="' + just + ' build $version"
+cmd="' + just + ' build $variant $version"
 if ! ' + podman + ' image exists "localhost/$image_name:$image_tag"; then
     echo "' + style('warning') + 'Warning' + NORMAL + ': Container Does Not Exist..." >&2
     echo "' + style('warning') + 'Will Run' + NORMAL + ': ' + style('command') + '$cmd' + NORMAL + '" >&2
@@ -81,18 +84,18 @@ explode-yaml:
     yq -r "explode(.)|.images" images.yaml
 
 [group('Utility')]
-check-valid-image $version="":
+check-valid-image $variant="" $version="":
     #!/usr/bin/env bash
     set -e
     {{ default-inputs }}
-    data=$(IFS='' yq -Mr "explode(.)|.images|.{{ image }}-$version" images.yaml)
+    data=$(IFS='' yq -Mr "explode(.)|.images|.$variant-$version" images.yaml)
     if [[ "null" == "$data" ]]; then
-        echo "ERROR Invalid inputs: no matching image definition found for: {{ image }}-${version}"
+        echo "ERROR Invalid inputs: no matching image definition found for: ${variant}-${version}"
         exit 1
     fi
 
 [group('Utility')]
-gen-tags $version="":
+gen-tags $variant="" $version="":
     #!/usr/bin/env bash
     {{ default-inputs }}
     {{ get-names }}
@@ -101,9 +104,7 @@ gen-tags $version="":
     TIMESTAMP="$(date +%Y%m%d)"
     LIST_TAGS="$(mktemp)"
     while [[ ! -s "$LIST_TAGS" ]]; do
-        # TODO: Temporarily hard-code tags before they have been populated
-        #skopeo list-tags docker://$image_registry/$image_org/$image_name > "$LIST_TAGS"
-        echo "{\"Tags\":[\"$image_name-$version\"]}" > $LIST_TAGS 
+       skopeo list-tags docker://$image_registry/$image_org/$image_name > "$LIST_TAGS"
     done
     if [[ $(cat "$LIST_TAGS" | jq "any(.Tags[]; contains(\"$image_tag-$TIMESTAMP\"))") == "true" ]]; then
        POINT="1"
@@ -125,7 +126,7 @@ gen-tags $version="":
     if [[ -n "{{ env('GITHUB_PR_NUMBER', '') }}" ]]; then
         COMMIT_TAGS=("$image_tag" "pr-$image_tag-$SHA_SHORT" "pr-$image_tag-{{ env('GITHUB_PR_NUMBER', '') }}")
     fi
-    BUILD_TAGS=("$image_tag" "$image_tag-$TIMESTAMP")
+    BUILD_TAGS=("$variant" "$image_tag" "$image_tag-$TIMESTAMP")
 
     declare -A output
     output["BUILD_TAGS"]="${BUILD_TAGS[*]}"
@@ -162,7 +163,7 @@ alias run := run-container
 # Run Container Image
 [group('Container')]
 [no-exit-message]
-run-container $version="":
+run-container $variant="" $version="":
     #!/usr/bin/env bash
     set -eou pipefail
     {{ default-inputs }}
@@ -177,17 +178,17 @@ alias build := build-container
 
 # Build Container Image
 [group('Container')]
-build-container $version="":
+build-container $variant="" $version="":
     #!/usr/bin/env bash
     {{ default-inputs }}
-    {{ just }} check-valid-image $version
+    {{ just }} check-valid-image $variant $version
     {{ get-names }}
-    mkdir -p {{ builddir / '$version' }}
+    mkdir -p {{ builddir / '$variant-$version' }}
     set ${CI:+-x} -eou pipefail
     # Verify Source: do after upstream starts signing images
 
     # Tags
-    declare -A gen_tags="($({{ just }} gen-tags $version))"
+    declare -A gen_tags="($({{ just }} gen-tags $variant $version))"
     if [[ "{{ env('GITHUB_EVENT_NAME', '') }}" =~ pull_request ]]; then
         tags=(${gen_tags["COMMIT_TAGS"]})
     else
@@ -212,7 +213,7 @@ build-container $version="":
         "--label" "org.opencontainers.image.description=$image_description"
         "--label" "org.opencontainers.image.license=GPLv3"
         "--label" "org.opencontainers.image.source=https://raw.githubusercontent.com/$image_org/$image_repo/refs/heads/main/Containerfile.in"
-        "--label" "org.opencontainers.image.title=\"$version\""
+        "--label" "org.opencontainers.image.title=\"$variant $version\""
         "--label" "org.opencontainers.image.url=https://github.com/$image_org/$image_repo"
         "--label" "org.opencontainers.image.vendor=$image_org"
         "--label" "org.opencontainers.image.version=${IMAGE_VERSION}"
@@ -235,6 +236,7 @@ build-container $version="":
         "--cpp-flag=-DIMAGE_VERSION_SUB=$IMAGE_VERSION"
         "--cpp-flag=-DEXIM_VERSION_SUB=$exim_version"
         "--cpp-flag=-DVERSION_SUB=$version"
+        "--cpp-flag=-DVARIANT_SUB=$variant"
         "--cpp-flag=-DSOURCE_IMAGE=$source_image"
         "--cpp-flag=-DARCH_SUB=$ARCH"
     )
@@ -250,35 +252,35 @@ build-container $version="":
             flags+=("${f#*flag=}")
         fi
     done
-    {{ require('cpp') }} -E -traditional container/Containerfile.in ${flags[@]} > {{ builddir / '$version/Containerfile' }}
+    {{ require('cpp') }} -E -traditional -P container/Containerfile.in ${flags[@]} > {{ builddir / '$variant-$version/Containerfile' }}
     labels="LABEL"
     for l in "${LABELS[@]}"; do
         if [[ "$l" != "--label" ]]; then
             labels+=" $(jq -R <<< "${l%%=*}")=$(jq -R <<< "${l#*=}")"
         fi
     done
-    echo "$labels" >> {{ builddir / '$version/Containerfile' }}
-    sed -i '/^$/d;/^#.*$/d' {{ builddir / '$version/Containerfile' }}
+    echo "$labels" >> {{ builddir / '$variant-$version/Containerfile' }}
+    sed -i '/^$/d;/^#.*$/d' {{ builddir / '$variant-$version/Containerfile' }}
 
     # Build Image
     {{ podman }} build -f container/Containerfile.in "${BUILD_ARGS[@]}" "${LABELS[@]}" "${TAGS[@]}" {{ justfile_dir() }}/container
 
 # HHD-Dev Rechunk Image
 [group('Container')]
-hhd-rechunk $version="":
+hhd-rechunk $variant="" $version="":
     #!/usr/bin/env bash
     {{ default-inputs }}
-    {{ just }} check-valid-image $version
+    {{ just }} check-valid-image $variant $version
     {{ get-names }}
-    mkdir -p {{ builddir / '$version' }}
-    {{ if shell('id -u') != '0' { podman + ' unshare -- ' + just + ' hhd-rechunk $version; exit $?' } else { '' } }}
+    mkdir -p {{ builddir / '$variant-$version' }}
+    {{ if shell('id -u') != '0' { podman + ' unshare -- ' + just + ' hhd-rechunk $variant $version; exit $?' } else { '' } }}
 
     set ${CI:+-x} -eou pipefail
 
     # Labels
     VERSION="$({{ podman }} inspect localhost/$image_name:$image_tag --format '{{{{ index .Config.Labels "org.opencontainers.image.version" }}')"
     LABELS="$({{ podman }} inspect localhost/$image_name:$image_tag | jq -r '.[].Config.Labels | to_entries | map("\(.key)=\(.value|tostring)")|.[]')"
-    CREF=$({{ podman }} create localhost/$image_name:$version bash)
+    CREF=$({{ podman }} create localhost/$image_name:$variant-$version bash)
     OUT_NAME="$image_name.tar"
     MOUNT="$({{ podman }} mount $CREF)"
 
@@ -305,11 +307,11 @@ hhd-rechunk $version="":
 
     {{ podman }} unmount "$CREF"
     {{ podman }} rm "$CREF"
-    {{ if env("CI", "") != "" { just + ' clean $version localhost' } else { '' } }}
+    {{ if env("CI", "") != "" { just + ' clean $variant $version localhost' } else { '' } }}
 
     {{ podman }} run --rm \
         --security-opt label=disable \
-        --volume "{{ builddir / '$version' }}:/workspace" \
+        --volume "{{ builddir / '$variant-$version' }}:/workspace" \
         --volume "{{ justfile_dir() }}:/var/git" \
         --volume cache_ostree:/var/ostree \
         --env REPO=/var/ostree/repo \
@@ -324,11 +326,11 @@ hhd-rechunk $version="":
         {{ rechunker }} \
         /sources/rechunk/3_chunk.sh
     {{ podman }} volume rm cache_ostree
-    {{ if env("CI", "") != "" { 'mv ' + builddir / '$version/$image_name.tar ' + justfile_dir() / '$image_name.tar' } else { '' } }}
+    {{ if env("CI", "") != "" { 'mv ' + builddir / '$variant-$version/$image_name.tar ' + justfile_dir() / '$image_name.tar' } else { '' } }}
 
 # Removes all Tags of an image from container storage.
 [group('Utility')]
-clean $version $registry="":
+clean $variant $version $registry="":
     #!/usr/bin/env bash
     set -eou pipefail
 
@@ -346,7 +348,7 @@ clean $version $registry="":
 
 # Push Images to Registry
 [group('CI')]
-push-to-registry $version="" $destination="" $transport="":
+push-to-registry $variant="" $version="" $destination="" $transport="":
     #!/usr/bin/bash
     {{ if env('CI', '') != '' { logsum } else { '' } }}
 
@@ -378,7 +380,7 @@ push-to-registry $version="" $destination="" $transport="":
     {{ if env('CI', '') != '' { 'log_sum "\`\`\`"' } else { '' } }}
     {{ if env('COSIGN_PRIVATE_KEY', '') != '' { 'rm /tmp/cosign.key' } else { '' } }}
 
-# Podmaon Machine Init
+# Podman Machine Init
 [group('Podman Machine')]
 init-machine:
     #!/usr/bin/env bash
@@ -412,35 +414,36 @@ start-machine: init-machine
 
 # Build Disk Image
 [group('BIB')]
-build-disk $version="" $registry="": start-machine
+build-disk $variant="" $version="" $registry="": start-machine
     #!/usr/bin/env bash
     {{ default-inputs }}
     : "${registry:=localhost}"
     {{ get-names }}
-    fq_name="$registry/$image_name:$image_tag"
+    if [[ "$registry" == 'localhost' ]]; then
+      fq_name="$image_name:$image_tag"
+    else
+      fq_name="$registry/$image_name:$image_tag"
+    fi
     set -eou pipefail
     # Create Build Dir
     mkdir -p {{ builddir / 'disks' }}
 
-    cp BIB/disk.toml {{ builddir / '$version.toml' }}
+    cp BIB/disk.toml {{ builddir / '$variant-$version.toml' }}
     if [[ "{{ PUBKEY }}" != ""  ]]; then
-        sed -i "s|<SSHPUBKEY>|$(cat {{ PUBKEY }})|" {{ builddir / '$version.toml' }}
+        sed -i "s|<SSHPUBKEY>|$(cat {{ PUBKEY }})|" {{ builddir / '$variant-$version.toml' }}
     else
-        sed -i "/<SSHPUBKEY>/d" {{ builddir / '$version.toml' }}
+        sed -i "/<SSHPUBKEY>/d" {{ builddir / '$variant-$version.toml' }}
     fi
  
     # Load image into rootful podman-machine
-    if ! {{ podman-remote }} image exists $fq_name && ! {{ podman }} image exists $fq_name; then
-        if ! [ "$registry" == "localhost" ]; then
-            # If using localhost registry, try pulling and check again
-            {{ podman-remote}} pull $fq_name
-            if ! {{ podman-remote }} image exists $fq_name && ! {{ podman }} image exists $fq_name; then
-                echo "{{ style('error') }}Error:{{ NORMAL }} Image \"$fq_name\" not in image-store" >&2
-                exit 1
-            fi
+    if ! sudo {{ podman }} image exists $fq_name; then
+        # If using localhost registry, we need to build
+        if  [ "$registry" == "localhost" ]; then
+            echo "NEED TO BUILD"
+            sudo just build $variant $version
+        # otherwise pull image from registry
         else
-            echo "{{ style('error') }}Error:{{ NORMAL }} Image \"$fq_name\" not in image-store" >&2
-            exit 1
+            sudo {{ podman }} pull $fq_name
         fi
     fi
     if ! {{ podman-remote }} image exists $fq_name; then
@@ -448,102 +451,76 @@ build-disk $version="" $registry="": start-machine
         TMPDIR="$COPYTMP" {{ podman }} image scp $fq_name podman-machine-default-root::
         rm -rf "$COPYTMP"
     fi
+    echo $fq_name
  
     # Remove existing image, if it exists
-    if [ -f "{{ builddir /'disks/$version.img' }}" ]; then
-        echo Removing existing disk image {{ builddir /'disks/$version.img' }}
-        rm -f {{ builddir /'disks/$version.img' }}
+    if [ -f "{{ builddir /'disks/$variant-$version.img' }}" ]; then
+        echo Removing existing disk image {{ builddir /'disks/$variant-$version.img' }}
+        rm -f {{ builddir /'disks/$variant-$version.img' }}
     fi
  
     if [[ ! -d {{ builddir }}/disks ]]; then
         mkdir {{ builddir }}/disks
     fi
-    if [[ ! -e {{ builddir }}/disks/$version.img ]]; then
-        fallocate -l 20G "{{ builddir }}/disks/$version.img"
+    if [[ ! -e {{ builddir }}/disks/$variant-$version.img ]]; then
+        fallocate -l 20G "{{ builddir }}/disks/$variant-$version.img"
     fi
     # Build Disk Image
+    echo $fq_name
     sudo podman run \
         --rm --privileged --pid=host \
         -it \
-        -v /sys/fs/selinux:/sys/fs/selinux \
-        -v /etc/containers:/etc/containers:Z \
-        -v /var/lib/containers:/var/lib/containers:Z \
+        -v /etc/containers:/etc/containers{{ if selinux == 'true' { ':Z' } else { '' } }} \
+        -v /var/lib/containers:/var/lib/containers{{ if selinux == 'true' { ':Z' } else { '' } }} \
+        {{ if selinux == 'true' { '-v /sys/fs/selinux/:/sys/fs/selinux' } else { '' } }} \
+        {{ if selinux == 'true' { '--security-opt label=type:unconfined_t' } else { '' } }} \
         -v /dev:/dev \
         -e BOOTC_SETENFORCE0_FALLBACK=1 \
+        -e RUST_LOG=debug \
         -v "{{ builddir }}/disks:/data" \
-        --security-opt label=type:unconfined_t \
-        "$fq_name" bootc install to-disk --composefs-backend --via-loopback "/data/$version.img" --filesystem ext4 --target-imgref $registry/$image_name:$version --wipe --bootloader systemd
+        "$fq_name" bootc install to-disk --composefs-backend --via-loopback "/data/$variant-$version.img" --filesystem ext4 --target-imgref $registry/$image_name:$variant-$version --wipe --bootloader systemd --karg "splash"
 
-#    # Pull Bootc Image Builder
-#    {{ podman-remote }} pull --retry 3 {{ bootc-image-builder }}
-#
-#    # Remove existing image, if it exists
-#    if [ -f "{{ builddir /'disks/$version.qcow2' }}" ]; then
-#        echo Removing existing disk image {{ builddir /'disks/$version.qcow2' }}
-#        rm -f {{ builddir /'disks/$version.qcow2' }}
-#    fi
-#    # Remove existing image, if it exists
-#    if [ -f "{{ builddir /'disks/$version.qcow2' }}" ]; then
-#        echo Removing existing disk image {{ builddir /'disks/$version.qcow2' }}
-#        rm -f {{ builddir /'disks/$version.qcow2' }}
-#    fi
-#    # Build Disk Image
-#    {{ podman-remote }} run \
-#        --rm \
-#        -it \
-#        --privileged \
-#        --pull=newer \
-#        --security-opt label=type:unconfined_t \
-#        -v {{ builddir / '$version' }}.toml:/config.toml:ro \
-#        -v {{ builddir }}/disks:/output \
-#        -v /var/lib/containers/storage:/var/lib/containers/storage \
-#        quay.io/centos-bootc/bootc-image-builder:latest \
-#        {{ if env('CI', '') != '' { '--progress verbose' } else { '--progress auto' } }} \
-#        --type qcow2 \
-#        --use-librepo=True \
-#        --rootfs ext4 \
-#        $fq_name
-#
-#    # Sparsify and compress
-#    echo Shrinking disk image
-#    qemu-img convert -c -O qcow2 {{ builddir }}/disks/qcow2/disk.qcow2 {{ builddir /'disks/$version.qcow2' }}
-#    rm -rf {{ builddir }}/disks/qcow2 {{ builddir }}/disks/manifest-qcow2.json {{ builddir / '$version*' }}
+alias vm-disk := convert-disk 
 
 # Convert disk to supported other VM formats
 [group('BIB')]
-convert-disk $diskformat="" $version="":
+convert-disk $diskformat="" $variant="" $version="":
     #!/usr/bin/env bash
     {{ default-inputs }}
     : "${diskformat:=all}"
     {{ get-names }}
     set -ou pipefail
-    if [ ! -f {{ builddir / 'disks/$version.qcow2' }} ]; then
-        # Attempt to build if not already built
-        {{ just }} build-disk $version
-        if [ ! -f {{ builddir / 'disks/$version.qcow2' }} ]; then
-            echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$version.qcow2\" not built" >&2 && exit 1
+    if [ ! -f {{ builddir / 'disks/$variant-$version.img' }} ]; then
+        just build-disk
+    fi
+    if [ "$diskformat" == "qcow2" ] || [ "$diskformat" == "all" ]; then
+        if [ -f {{ builddir / 'disks/$variant-$version.qcow2' }} ]; then
+            echo Removing existing disk image {{ builddir / 'disks/$variant-$version.qcow2' }}
+            rm -f {{ builddir / 'disks/$variant-$version.qcow2' }}
         fi
+        echo Creating QCOW2 disk
+        qemu-img convert -p -O qcow2 {{ builddir / 'disks/$variant-$version.img' }} {{ builddir / 'disks/$variant-$version.qcow2' }}
     fi
     if [ "$diskformat" == "vmdk" ] || [ "$diskformat" == "all" ]; then
-        if [ -f {{ builddir / 'disks/$version.vmdk' }} ]; then
-            echo Removing existing disk image {{ builddir / 'disks/$version.vmdk' }}
-            rm -f {{ builddir / 'disks/$version.vmdk' }}
+        if [ -f {{ builddir / 'disks/$variant-$version.vmdk' }} ]; then
+            echo Removing existing disk image {{ builddir / 'disks/$variant-$version.vmdk' }}
+            rm -f {{ builddir / 'disks/$variant-$version.vmdk' }}
         fi
         echo Creating VMDK disk
-        qemu-img convert -p -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6 {{ builddir / 'disks/$version.qcow2' }} {{ builddir / 'disks/$version.vmdk' }}
+        qemu-img convert -p -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6 {{ builddir / 'disks/$variant-$version.img' }} {{ builddir / 'disks/$variant-$version.vmdk' }}
     fi
     if [ "$diskformat" == "vhdx" ] || [ "$diskformat" == "all" ]; then
-        if [ -f {{ builddir / 'disks/$version.vhdx' }} ]; then
-            echo Removing existing disk image {{ builddir / 'disks/$version.vhdx' }}
-            rm -f {{ builddir / 'disks/$version.vhdx' }}
+        if [ -f {{ builddir / 'disks/$variant-$version.vhdx' }} ]; then
+            echo Removing existing disk image {{ builddir / 'disks/$variant-$version.vhdx' }}
+            rm -f {{ builddir / 'disks/$variant-$version.vhdx' }}
         fi
         echo Creating VHDX disk
-        qemu-img convert -p -O vhdx -o subformat=dynamic,block_size=1M {{ builddir / 'disks/$version.qcow2' }} {{ builddir / 'disks/$version.vhdx' }}
+        qemu-img convert -p -O vhdx -o subformat=dynamic,block_size=1M {{ builddir / 'disks/$variant-$version.img' }} {{ builddir / 'disks/$variant-$version.vhdx' }}
     fi
 
 # Bundle VM images into compressed archives with bundled files
 [group('BIB')]
-bundle-vm $vmformat="" $version="":
+bundle-vm $vmformat="" $variant="" $version="":
     #!/usr/bin/env bash
     {{ default-inputs }}
     : "${vmformat:=all}"
@@ -554,10 +531,10 @@ bundle-vm $vmformat="" $version="":
         mkdir {{ builddir / 'bundles' }}
     fi
     if [ "$vmformat" == "all" ]; then
-        {{ just }} bundle-vm $version kvm
-        {{ just }} bundle-vm $version ami
-        {{ just }} bundle-vm $version ova
-        {{ just }} bundle-vm $version vhdx
+        {{ just }} bundle-vm $variant $version kvm
+        {{ just }} bundle-vm $variant $version ami
+        {{ just }} bundle-vm $variant $version ova
+        {{ just }} bundle-vm $variant $version vhdx
     else
         DISK="{{ vmformat }}"
         if [ "$vmformat" == "ova" ] || [ "$vmformat" == "ami" ]; then
@@ -566,43 +543,43 @@ bundle-vm $vmformat="" $version="":
         if [ "$vmformat" == "kvm" ]; then
             DISK='qcow2'
         fi
-        if [ ! -f {{ builddir / 'disks/$version' }}.$DISK ]; then
-            {{ just }} convert-disk $version $DISK
-            if [ ! -f {{ builddir / 'disks/$version' }}.$DISK ]; then
-                echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$version.$DISK\" does not exist" >&2 && exit 1
+        if [ ! -f {{ builddir / 'disks/$variant-$version' }}.$DISK ]; then
+            {{ just }} convert-disk $variant $version $DISK
+            if [ ! -f {{ builddir / 'disks/$variant-$version' }}.$DISK ]; then
+                echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$version-$variant.$DISK\" does not exist" >&2 && exit 1
             fi
         fi
-        if [ -f {{ builddir / 'bundles/$version.$vmformat.zip' }}.$DISK ]; then
-            echo Removing existing VM bundle {{ builddir / 'bundles/$version-$vmformat.zip' }}
-            rm {{ builddir / 'bundles/$version-$vmformat.zip' }}
+        if [ -f {{ builddir / 'bundles/$variant-$version.$vmformat.zip' }}.$DISK ]; then
+            echo Removing existing VM bundle {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }}
+            rm {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }}
         fi
         echo Compressing $vmformat
-        zip -r -j {{ builddir / 'bundles/$version-$vmformat.zip' }} {{ builddir / 'disks/$version' }}.$DISK BIB/vm-files/$vmformat/*
+        zip -r -j {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }} {{ builddir / 'disks/$variant-$version' }}.$DISK BIB/vm-files/$vmformat/*
         echo Generating checksum for $vmformat
-        sha256sum {{ builddir / 'bundles/$version-$vmformat.zip' }} > {{ builddir / 'bundles/$version-$vmformat.zip.sha256' }}
+        sha256sum {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }} > {{ builddir / 'bundles/$variant-$version-$vmformat.zip.sha256' }}
     fi
 
 [group('BIB')]
-push-to-cdn $version="":
+push-to-cdn $variant="" $version="":
     #!/usr/bin/env bash
     echo "not implemented"
 
 # Run Disk Image
 [group('BIB')]
-run-disk $version="" $registry="":
+run-disk $variant="" $version="" $registry="":
     #!/usr/bin/env bash
     {{ default-inputs }}
     : "${registry:=localhost}"
     {{ get-names }}
     set -ou pipefail
-    if [ ! -f {{ builddir / 'disks/$version.qcow2' }} ]; then
-        echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$image_name-$version\" not built" >&2 && exit 1
+    if [ ! -f {{ builddir / 'disks/$variant-$version.qcow2' }} ]; then
+        echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$image_name-$version-$variant\" not built" >&2 && exit 1
     fi
 
     {{ require('macadam') }} init \
         --ssh-identity-path {{ PRIVKEY }} \
         --username root \
-        {{ builddir / 'disks/$version.qcow2' }} 2> {{ builddir }}/error.log
+        {{ builddir / 'disks/$variant-$version.qcow2' }} 2> {{ builddir }}/error.log
     ec=$?
     if [ $ec != 0 ] && ! grep -q 'VM already exists' {{ builddir }}/error.log; then
         printf '{{ style('error') }}Error:{{ NORMAL }} %s\n' "$(sed -E 's/Error:\s//' {{ builddir }}/error.log)" >&2
@@ -620,32 +597,36 @@ run-disk $version="" $registry="":
 
 # Build ISO
 [group('BIB')]
-build-iso $version="" $registry="": start-machine
+build-iso $variant="" $version="" $registry="": start-machine
     #!/usr/bin/env bash
     {{ default-inputs }}
     : "${registry:=localhost}"
     {{ get-names }}
-    fq_name="$registry/$image_name:$version"
+    fq_name="$registry/$image_name:$variant-$version"
     set -eou pipefail
 
     if [ ! -d {{ builddir / 'isos' }} ]; then
         echo Creating build directory {{ builddir / 'isos' }}
         mkdir -p {{ builddir / 'isos' }}
-    elif [ -e {{ builddir / 'isos/$version.iso' }} ]; then
-        echo Removing existing ISO image {{ builddir / 'isos/$version.iso' }}
-        rm {{ builddir / 'isos/$version.iso' }}
+    elif [ -e {{ builddir / 'isos/$variant-$version.iso' }} ]; then
+        echo Removing existing ISO image {{ builddir / 'isos/$variant-$version.iso' }}
+        rm {{ builddir / 'isos/$variant-$version.iso' }}
     fi
 
     if [ -d {{ builddir / 'product' }} ]; then
         rm -rf {{ builddir / 'product' }}
     fi
 
-    declare -A gen_tags="($({{ just }} gen-tags $version))"
+    declare -A gen_tags="($({{ just }} gen-tags $variant $version))"
     TIMESTAMP="${gen_tags["TIMESTAMP"]}"
 
     cp -r BIB/anaconda/product {{ builddir / 'product' }}
     cd {{ builddir / 'product' }}
-    sed -i "s/<VARIANT>/Knotty Pine/" .buildstamp
+    if [ "$variant" == 'desktop' ]; then
+      sed -i "s/<VARIANT>/Desktop/" .buildstamp
+    else
+      sed -i "s/<VARIANT>/Server/" .buildstamp
+    fi
     sed -i "s/<VERSION>/$version/" .buildstamp
     sed -i "s/<TAG>/$TIMESTAMP/" .buildstamp
     find . | cpio -c -o | gzip -9cv >../product.img
@@ -654,12 +635,12 @@ build-iso $version="" $registry="": start-machine
     #rm -rf {{ builddir / 'product' }}
 
     # Process Template
-    cp BIB/iso.toml {{ builddir / '$version.toml' }}
-    sed -i "s|<URL>|$fq_name|" {{ builddir / '$version.toml' }}
+    cp BIB/iso.toml {{ builddir / '$variant-$version.toml' }}
+    sed -i "s|<URL>|$fq_name|" {{ builddir / '$variant-$version.toml' }}
     if [[ $registry == "localhost" ]]; then
-        sed -i "s|<SIGPOLICY>||" {{ builddir / '$version.toml' }}
+        sed -i "s|<SIGPOLICY>||" {{ builddir / '$variant-$version.toml' }}
     else
-        sed -i "s|<SIGPOLICY>| --enforce-container-sigpolicy|" {{ builddir / '$version.toml' }}
+        sed -i "s|<SIGPOLICY>| --enforce-container-sigpolicy|" {{ builddir / '$variant-$version.toml' }}
     fi
 
     # Load image into rootful podman-machine
@@ -676,8 +657,8 @@ build-iso $version="" $registry="": start-machine
     # Pull Bootc Image Builder
     {{ podman-remote }} pull --retry 3 {{ bootc-image-builder }}
 
-    if [ ! -d {{ builddir / '$version' }} ]; then
-        mkdir {{ builddir / '$version' }}
+    if [ ! -d {{ builddir / '$variant-$version' }} ]; then
+        mkdir {{ builddir / '$variant-$version' }}
     fi
 
     # Build ISO
@@ -687,8 +668,8 @@ build-iso $version="" $registry="": start-machine
         --privileged \
         --pull=newer \
         --security-opt label=type:unconfined_t \
-        -v {{ builddir / '$version.toml' }}:/config.toml:ro \
-        -v {{ builddir / '$version' }}:/output \
+        -v {{ builddir / '$variant-$version.toml' }}:/config.toml:ro \
+        -v {{ builddir / '$variant-$version' }}:/output \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
         {{ if env('CI', '') != '' { '--progress verbose' } else { '--progress auto' } }} \
@@ -696,18 +677,18 @@ build-iso $version="" $registry="": start-machine
         --use-librepo=True \
         $fq_name
 
-    mv {{ builddir / '$version/bootiso/install.iso' }} {{ builddir / 'isos/$version.iso' }}
-    rm -rf {{ builddir / '$version' }} product.img
+    mv {{ builddir / '$variant-$version/bootiso/install.iso' }} {{ builddir / 'isos/$variant-$version.iso' }}
+    rm -rf {{ builddir / '$variant-$version' }} product.img
 
 # Run ISO
 [group('BIB')]
-run-iso $version="":
+run-iso $variant="" $version="":
     #!/usr/bin/env bash
     {{ default-inputs }}
     {{ get-names }}
     set -euo pipefail
-    if [ ! -f {{ builddir / '$version/bootiso/install.iso' }} ]; then
-        echo "{{ style('error') }}Error:{{ NORMAL }} Install ISO \"$image_name-$version\" not built" >&2 && exit 1
+    if [ ! -f {{ builddir / '$variant-$version/bootiso/install.iso' }} ]; then
+        echo "{{ style('error') }}Error:{{ NORMAL }} Install ISO \"$image_name-$variant-$version\" not built" >&2 && exit 1
     fi
     # Determine an available port to use
     port=8006
@@ -746,7 +727,7 @@ run-iso $version="":
     run_args+=(--device=/dev/kvm)
     run_args+=(--device=/dev/net/tun)
     run_args+=(--cap-add NET_ADMIN)
-    run_args+=(--volume "{{ builddir / '$version/bootiso/install.iso' }}":"/boot.iso")
+    run_args+=(--volume "{{ builddir / '$variant-$version/bootiso/install.iso' }}":"/boot.iso")
 
     # Run the VM and open the browser to connect
     {{ podman-remote }} run "${run_args[@]}" {{ qemu }}
