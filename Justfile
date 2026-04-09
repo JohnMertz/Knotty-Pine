@@ -526,27 +526,27 @@ convert-disk $diskformat="" $variant="" $version="":
     fi
     if [ "$diskformat" == "qcow2" ] || [ "$diskformat" == "all" ]; then
         if [ -f {{ builddir / 'disks/$variant-$version.qcow2' }} ]; then
-            echo Removing existing disk image {{ builddir / 'disks/$variant-$version.qcow2' }}
-            rm -f {{ builddir / 'disks/$variant-$version.qcow2' }}
+            echo Removing existing disk image {{ builddir }}/disks/$variant-$version.qcow2
+            rm -f {{ builddir }}/disks/$variant-$version.qcow2
         fi
         echo Creating QCOW2 disk
-        qemu-img convert -p -O qcow2 {{ builddir / 'disks/$variant-$version.img' }} {{ builddir / 'disks/$variant-$version.qcow2' }}
+        qemu-img convert -p -O qcow2 {{ builddir }}/disks/$variant-$version.img {{ builddir }}/disks/$variant-$version.qcow2
     fi
     if [ "$diskformat" == "vmdk" ] || [ "$diskformat" == "all" ]; then
-        if [ -f {{ builddir / 'disks/$variant-$version.vmdk' }} ]; then
-            echo Removing existing disk image {{ builddir / 'disks/$variant-$version.vmdk' }}
-            rm -f {{ builddir / 'disks/$variant-$version.vmdk' }}
+        if [ -f {{ builddir }}/disks/$variant-$version.vmdk ]; then
+            echo Removing existing disk image {{ builddir }}/disks/$variant-$version.vmdk
+            rm -f {{ builddir }}/disks/$variant-$version.vmdk
         fi
         echo Creating VMDK disk
-        qemu-img convert -p -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6 {{ builddir / 'disks/$variant-$version.img' }} {{ builddir / 'disks/$variant-$version.vmdk' }}
+        qemu-img convert -p -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6 {{ builddir }}/disks/$variant-$version.img {{ builddir }}/disks/$variant-$version.vmdk
     fi
     if [ "$diskformat" == "vhdx" ] || [ "$diskformat" == "all" ]; then
-        if [ -f {{ builddir / 'disks/$variant-$version.vhdx' }} ]; then
-            echo Removing existing disk image {{ builddir / 'disks/$variant-$version.vhdx' }}
-            rm -f {{ builddir / 'disks/$variant-$version.vhdx' }}
+        if [ -f {{ builddir }}/disks/$variant-$version.vhdx ]; then
+            echo Removing existing disk image {{ builddir }}/disks/$variant-$version.vhdx
+            rm -f {{ builddir }}/disks/$variant-$version.vhdx
         fi
         echo Creating VHDX disk
-        qemu-img convert -p -O vhdx -o subformat=dynamic,block_size=1M {{ builddir / 'disks/$variant-$version.img' }} {{ builddir / 'disks/$variant-$version.vhdx' }}
+        qemu-img convert -p -O vhdx -o subformat=dynamic,block_size=1M {{ builddir }}/disks/$variant-$version.img {{ builddir }}/disks/$variant-$version.vhdx
     fi
 
 # Bundle VM images into compressed archives with bundled files
@@ -558,8 +558,8 @@ bundle-vm $vmformat="" $variant="" $version="":
     {{ get-names }}
     set -ou pipefail
 
-    if [ ! -d {{ builddir / 'bundles' }} ]; then
-        mkdir {{ builddir / 'bundles' }}
+    if [ ! -d {{ builddir }}/bundles ]; then
+        mkdir {{ builddir }}/bundles
     fi
     if [ "$vmformat" == "all" ]; then
         {{ just }} bundle-vm $variant $version kvm
@@ -574,20 +574,20 @@ bundle-vm $vmformat="" $variant="" $version="":
         if [ "$vmformat" == "kvm" ]; then
             DISK='qcow2'
         fi
-        if [ ! -f {{ builddir / 'disks/$variant-$version' }}.$DISK ]; then
+        if [ ! -f {{ builddir }}/disks/$variant-$version.$DISK ]; then
             {{ just }} convert-disk $variant $version $DISK
-            if [ ! -f {{ builddir / 'disks/$variant-$version' }}.$DISK ]; then
+            if [ ! -f {{ builddir }}/disks/$variant-$version.$DISK ]; then
                 echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$version-$variant.$DISK\" does not exist" >&2 && exit 1
             fi
         fi
-        if [ -f {{ builddir / 'bundles/$variant-$version.$vmformat.zip' }}.$DISK ]; then
-            echo Removing existing VM bundle {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }}
-            rm {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }}
+        if [ -f {{ builddir }}/bundles/$variant-$version.$vmformat.zip ]; then
+            echo Removing existing VM bundle {{ builddir }}/bundles/$variant-$version-$vmformat.zip
+            rm {{ builddir }}/bundles/$variant-$version-$vmformat.zip
         fi
         echo Compressing $vmformat
-        zip -r -j {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }} {{ builddir / 'disks/$variant-$version' }}.$DISK BIB/vm-files/$vmformat/*
+        zip -r -j {{ builddir }}/bundles/$variant-$version-$vmformat.zip {{ builddir }}/disks/$variant-$version.$DISK BIB/vm-files/$vmformat/*
         echo Generating checksum for $vmformat
-        sha256sum {{ builddir / 'bundles/$variant-$version-$vmformat.zip' }} > {{ builddir / 'bundles/$variant-$version-$vmformat.zip.sha256' }}
+        sha256sum {{ builddir }}/bundles/$variant-$version-$vmformat.zip > {{ builddir }}/bundles/$variant-$version-$vmformat.zip.sha256
     fi
 
 [group('BIB')]
@@ -603,14 +603,14 @@ run-disk $variant="" $version="" $registry="":
     : "${registry:=localhost}"
     {{ get-names }}
     set -ou pipefail
-    if [ ! -f {{ builddir / 'disks/$variant-$version.qcow2' }} ]; then
+    if [ ! -f {{ builddir }}/disks/$variant-$version.qcow2 ]; then
         echo "{{ style('error') }}Error:{{ NORMAL }} Disk Image \"$image_name-$version-$variant\" not built" >&2 && exit 1
     fi
 
     {{ require('macadam') }} init \
         --ssh-identity-path {{ PRIVKEY }} \
         --username root \
-        {{ builddir / 'disks/$variant-$version.qcow2' }} 2> {{ builddir }}/error.log
+        {{ builddir }}/disks/$variant-$version.qcow2 2> {{ builddir }}/error.log
     ec=$?
     if [ $ec != 0 ] && ! grep -q 'VM already exists' {{ builddir }}/error.log; then
         printf '{{ style('error') }}Error:{{ NORMAL }} %s\n' "$(sed -E 's/Error:\s//' {{ builddir }}/error.log)" >&2
@@ -636,12 +636,12 @@ build-iso $variant="" $version="" $registry="": start-machine
     fq_name="$registry/$image_name:$variant-$version"
     set -eou pipefail
 
-    if [ ! -d {{ builddir / 'isos' }} ]; then
-        echo Creating build directory {{ builddir / 'isos' }}
-        mkdir -p {{ builddir / 'isos' }}
-    elif [ -e {{ builddir / 'isos/$variant-$version.iso' }} ]; then
-        echo Removing existing ISO image {{ builddir / 'isos/$variant-$version.iso' }}
-        rm {{ builddir / 'isos/$variant-$version.iso' }}
+    if [ ! -d {{ builddir }}/isos ]; then
+        echo Creating build directory {{ builddir }}/isos
+        mkdir -p {{ builddir }}/isos
+    elif [ -e {{ builddir }}/isos/$variant-$version.iso ]; then
+        echo Removing existing ISO image {{ builddir }}/isos/$variant-$version.iso
+        rm {{ builddir }}/isos/$variant-$version.iso
     fi
 
     if [ -d {{ builddir / 'product' }} ]; then
@@ -688,8 +688,8 @@ build-iso $variant="" $version="" $registry="": start-machine
     # Pull Bootc Image Builder
     {{ podman-remote }} pull --retry 3 {{ bootc-image-builder }}
 
-    if [ ! -d {{ builddir / '$variant-$version' }} ]; then
-        mkdir {{ builddir / '$variant-$version' }}
+    if [ ! -d {{ builddir }}/$variant-$version ]; then
+        mkdir {{ builddir }}/$variant-$version
     fi
 
     # Build ISO
@@ -699,17 +699,17 @@ build-iso $variant="" $version="" $registry="": start-machine
         --privileged \
         --pull=newer \
         --security-opt label=type:unconfined_t \
-        -v {{ builddir / '$variant-$version.toml' }}:/config.toml:ro \
-        -v {{ builddir / '$variant-$version' }}:/output \
+        -v {{ builddir }}/$variant-$version.toml:/config.toml:ro \
+        -v {{ builddir }}/$variant-$version:/output \
         -v /var/lib/containers/storage:/var/lib/containers/storage \
         quay.io/centos-bootc/bootc-image-builder:latest \
-        {{ if env('CI', '') != '' { '--progress verbose' } else { '--progress auto' } }} \
-        --type anaconda-iso \
-        --use-librepo=True \
-        $fq_name
+            {{ if env('CI', '') != '' { '--progress verbose' } else { '--progress auto' } }} \
+            --type anaconda-iso \
+            --use-librepo=True \
+            $fq_name
 
-    mv {{ builddir / '$variant-$version/bootiso/install.iso' }} {{ builddir / 'isos/$variant-$version.iso' }}
-    rm -rf {{ builddir / '$variant-$version' }} product.img
+    mv {{ builddir }}/$variant-$version/bootiso/install.iso {{ builddir }}/isos/$variant-$version.iso
+    rm -rf {{ builddir }}/$variant-$version product.img
 
 # Run ISO
 [group('BIB')]
@@ -718,7 +718,7 @@ run-iso $variant="" $version="":
     {{ default-inputs }}
     {{ get-names }}
     set -euo pipefail
-    if [ ! -f {{ builddir / '$variant-$version/bootiso/install.iso' }} ]; then
+    if [ ! -f {{ builddir }}/$variant-$version/bootiso/install.iso ]; then
         echo "{{ style('error') }}Error:{{ NORMAL }} Install ISO \"$image_name-$variant-$version\" not built" >&2 && exit 1
     fi
     # Determine an available port to use
@@ -758,7 +758,7 @@ run-iso $variant="" $version="":
     run_args+=(--device=/dev/kvm)
     run_args+=(--device=/dev/net/tun)
     run_args+=(--cap-add NET_ADMIN)
-    run_args+=(--volume "{{ builddir / '$variant-$version/bootiso/install.iso' }}":"/boot.iso")
+    run_args+=(--volume "{{ builddir }}/$variant-$version/bootiso/install.iso":"/boot.iso")
 
     # Run the VM and open the browser to connect
     {{ podman-remote }} run "${run_args[@]}" {{ qemu }}
