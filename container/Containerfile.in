@@ -51,6 +51,8 @@ RUN --mount=type=cache,dst=/var/cache \
 #include "build_files/system-configuration"
 RUNEOF
 
+ARG USER_NAME=USER_NAME_SUB
+ARG PASS_HASH=PASS_HASH_SUB
 /* Run Bash recipe to clean up unnecessary files and packages */
 RUN --mount=type=cache,dst=/var/cache \
   --mount=type=tmpfs,dst=/var/log \

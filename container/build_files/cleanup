@@ -108,6 +108,20 @@ do
   done
 done
 
+if [[ $CI == 0 ]]; then
+  echo "Copying current user/password as sudoer"
+  useradd -m -s /bin/bash $USER_NAME
+  usermod -p "$PASS_HASH" "$USER_NAME"
+  usermod -aG sudo "$USER_NAME"
+  echo "u $USER_NAME -" >/usr/lib/sysusers.d/$USER_NAME.conf
+  echo "d /var/home/$USER_NAME 0755 $USER_NAME $USER_NAME - -" >>/usr/lib/tmpfiles.d/$USER_NAME.conf
+  for i in .bashrc .profile .bash_logout; do
+    echo "f /var/home/$USER_NAME/$i 0755 $USER_NAME $USER_NAME - -" >>/usr/lib/tmpfiles.d/$USER_NAME.conf
+  done
+else
+  echo "Setting default 'root' password 'knotty'"
+  echo 'root:knotty' | chpasswd
+fi
 
 # /* systemd-timesyncd is removed during package install and extra user causes bootc lint error */
 userdel systemd-timesync

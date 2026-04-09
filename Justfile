@@ -1,3 +1,4 @@
+# vim: set ts=4 sw=4 expandtab :
 set unstable := true
 
 just := just_executable()
@@ -230,15 +231,17 @@ build-container $variant="" $version="":
 
     # BuildArgs
     BUILD_ARGS=(
+        "--compress"
         "--security-opt=label=disable"
         "--cap-add=all"
         "--device" "/dev/fuse"
         "--cpp-flag=-DIMAGE_VERSION_SUB=$IMAGE_VERSION"
-        "--cpp-flag=-DEXIM_VERSION_SUB=$exim_version"
         "--cpp-flag=-DVERSION_SUB=$version"
         "--cpp-flag=-DVARIANT_SUB=$variant"
         "--cpp-flag=-DSOURCE_IMAGE=$source_image"
         "--cpp-flag=-DARCH_SUB=$ARCH"
+        "--cpp-flag=-DUSER_NAME_SUB=$USER"
+        "--cpp-flag=-DPASS_HASH_SUB=$(sudo grep $USER: /etc/shadow | cut -d: -f2 | sed 's/\$/\\$/g')"
     )
     for FLAG in $image_cpp_flags; do
         BUILD_ARGS+=("--cpp-flag=-D$FLAG")
