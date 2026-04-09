@@ -644,72 +644,30 @@ build-iso $variant="" $version="" $registry="": start-machine
         rm {{ builddir }}/isos/$variant-$version.iso
     fi
 
-    if [ -d {{ builddir / 'product' }} ]; then
-        rm -rf {{ builddir / 'product' }}
+    if [[ ! -e {{ builddir }}/disks/$variant-$version.img ]]; then
+        just build-disk
+    fi
+    if ! {{ podman }} image exists bootc-iso-builder; then
+        echo "Building ISO build container..."
+        podman build -t bootc-iso-builder Bootc-ISO-Builder
     fi
 
-    declare -A gen_tags="($({{ just }} gen-tags $variant $version))"
-    TIMESTAMP="${gen_tags["TIMESTAMP"]}"
-
-    cp -r BIB/anaconda/product {{ builddir / 'product' }}
-    cd {{ builddir / 'product' }}
-    if [ "$variant" == 'desktop' ]; then
-      sed -i "s/<VARIANT>/Desktop/" .buildstamp
-    else
-      sed -i "s/<VARIANT>/Server/" .buildstamp
-    fi
-    sed -i "s/<VERSION>/$version/" .buildstamp
-    sed -i "s/<TAG>/$TIMESTAMP/" .buildstamp
-    find . | cpio -c -o | gzip -9cv >../product.img
-    cd -
-    mv {{ builddir /'product.img' }} ./
-    #rm -rf {{ builddir / 'product' }}
-
-    # Process Template
-    cp BIB/iso.toml {{ builddir / '$variant-$version.toml' }}
-    sed -i "s|<URL>|$fq_name|" {{ builddir / '$variant-$version.toml' }}
-    if [[ $registry == "localhost" ]]; then
-        sed -i "s|<SIGPOLICY>||" {{ builddir / '$variant-$version.toml' }}
-    else
-        sed -i "s|<SIGPOLICY>| --enforce-container-sigpolicy|" {{ builddir / '$variant-$version.toml' }}
-    fi
-
-    # Load image into rootful podman-machine
-    if ! {{ podman-remote }} image exists $fq_name && ! {{ podman }} image exists $fq_name; then
-        echo "{{ style('error') }}Error:{{ NORMAL }} Image \"$fq_name\" not in image-store" >&2
-        exit 1
-    fi
-    if ! {{ podman-remote }} image exists $fq_name; then
-        COPYTMP="$(mktemp -p {{ builddir }} -d -t podman_scp.XXXXXXXXXX)" && trap 'rm -rf $COPYTMP' EXIT SIGINT
-        TMPDIR="$COPYTMP" {{ podman }} image scp $fq_name podman-machine-default-root::
-        rm -rf "$COPYTMP"
-    fi
-
-    # Pull Bootc Image Builder
-    {{ podman-remote }} pull --retry 3 {{ bootc-image-builder }}
-
-    if [ ! -d {{ builddir }}/$variant-$version ]; then
-        mkdir {{ builddir }}/$variant-$version
-    fi
-
-    # Build ISO
-    {{ podman-remote }} run \
-        --rm \
-        -it \
+    echo "Running ISO build container..."
+    {{ podman }} run --rm --privileged \
+        -v {{ builddir }}:/work \
         --privileged \
-        --pull=newer \
-        --security-opt label=type:unconfined_t \
-        -v {{ builddir }}/$variant-$version.toml:/config.toml:ro \
-        -v {{ builddir }}/$variant-$version:/output \
-        -v /var/lib/containers/storage:/var/lib/containers/storage \
-        quay.io/centos-bootc/bootc-image-builder:latest \
-            {{ if env('CI', '') != '' { '--progress verbose' } else { '--progress auto' } }} \
-            --type anaconda-iso \
-            --use-librepo=True \
-            $fq_name
-
-    mv {{ builddir }}/$variant-$version/bootiso/install.iso {{ builddir }}/isos/$variant-$version.iso
-    rm -rf {{ builddir }}/$variant-$version product.img
+        bootc-iso-builder \
+        bash -c "\
+            set -e; \
+            ISO_ROOT=/work/tmp/iso-root; \
+            mkdir -p $$ISO_ROOT/live $$ISO_ROOT/boot; \
+            mksquashfs /work/disks/$variant-$version.img $$ISO_ROOT/live/filesystem.squashfs; \
+            mkdir -p tmp/boot; \
+            unsquashfs -d tmp/rootfs $$ISO_ROOT/live/filesystem.squashfs; \
+            cp tmp/rootfs/boot/vmlinuz-* $$ISO_ROOT/boot/vmlinuz
+            cp tmp/rootfs/boot/initrd.img-* $$ISO_ROOT/boot/initrd
+            grub-mkrescue -o /work/isos/$variant-$version.iso $$ISO_ROOT; \
+            rm -rf $$ISO_ROOT"
 
 # Run ISO
 [group('BIB')]
@@ -718,8 +676,9 @@ run-iso $variant="" $version="":
     {{ default-inputs }}
     {{ get-names }}
     set -euo pipefail
-    if [ ! -f {{ builddir }}/$variant-$version/bootiso/install.iso ]; then
-        echo "{{ style('error') }}Error:{{ NORMAL }} Install ISO \"$image_name-$variant-$version\" not built" >&2 && exit 1
+    if [ ! -f {{ builddir }}/isos/$variant-$version.iso ]; then
+        echo "{{ style('error') }}Error:{{ NORMAL }} Install ISO \"{{ builddir }}/isos/$variant-$version.iso\" not built yet."
+        just build-iso
     fi
     # Determine an available port to use
     port=8006
