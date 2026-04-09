@@ -184,7 +184,7 @@ build-container $variant="" $version="":
     {{ default-inputs }}
     {{ just }} check-valid-image $variant $version
     {{ get-names }}
-    mkdir -p {{ builddir / '$variant-$version' }}
+    mkdir -p {{ builddir }}/$variant-$version
     set ${CI:+-x} -eou pipefail
     # Verify Source: do after upstream starts signing images
 
@@ -255,15 +255,15 @@ build-container $variant="" $version="":
             flags+=("${f#*flag=}")
         fi
     done
-    {{ require('cpp') }} -E -traditional -P container/Containerfile.in ${flags[@]} > {{ builddir / '$variant-$version/Containerfile' }}
+    {{ require('cpp') }} -E -traditional -P container/Containerfile.in ${flags[@]} > {{ builddir }}/$variant-$version/Containerfile
     labels="LABEL"
     for l in "${LABELS[@]}"; do
         if [[ "$l" != "--label" ]]; then
             labels+=" $(jq -R <<< "${l%%=*}")=$(jq -R <<< "${l#*=}")"
         fi
     done
-    echo "$labels" >> {{ builddir / '$variant-$version/Containerfile' }}
-    sed -i '/^$/d;/^#.*$/d' {{ builddir / '$variant-$version/Containerfile' }}
+    echo "$labels" >> {{ builddir }}/$variant-$version/Containerfile
+    sed -i '/^$/d;/^#.*$/d' {{ builddir }}/$variant-$version/Containerfile
 
     # Build Image
     {{ podman }} build -f container/Containerfile.in "${BUILD_ARGS[@]}" "${LABELS[@]}" "${TAGS[@]}" {{ justfile_dir() }}/container
@@ -275,7 +275,7 @@ hhd-rechunk $variant="" $version="":
     {{ default-inputs }}
     {{ just }} check-valid-image $variant $version
     {{ get-names }}
-    mkdir -p {{ builddir / '$variant-$version' }}
+    mkdir -p {{ builddir }}/$variant-$version
     {{ if shell('id -u') != '0' { podman + ' unshare -- ' + just + ' hhd-rechunk $variant $version; exit $?' } else { '' } }}
 
     set ${CI:+-x} -eou pipefail
@@ -314,7 +314,7 @@ hhd-rechunk $variant="" $version="":
 
     {{ podman }} run --rm \
         --security-opt label=disable \
-        --volume "{{ builddir / '$variant-$version' }}:/workspace" \
+        --volume "{{ builddir }}/$variant-$version:/workspace" \
         --volume "{{ justfile_dir() }}:/var/git" \
         --volume cache_ostree:/var/ostree \
         --env REPO=/var/ostree/repo \
@@ -429,13 +429,13 @@ build-disk $variant="" $version="" $registry="": start-machine
     fi
     set -eou pipefail
     # Create Build Dir
-    mkdir -p {{ builddir / 'disks' }}
+    mkdir -p {{ builddir }}/disks
 
-    cp BIB/disk.toml {{ builddir / '$variant-$version.toml' }}
+    cp BIB/disk.toml {{ builddir }}/$variant-$version.toml
     if [[ "{{ PUBKEY }}" != ""  ]]; then
-        sed -i "s|<SSHPUBKEY>|$(cat {{ PUBKEY }})|" {{ builddir / '$variant-$version.toml' }}
+        sed -i "s|<SSHPUBKEY>|$(cat {{ PUBKEY }})|" {{ builddir }}/$variant-$version.toml
     else
-        sed -i "/<SSHPUBKEY>/d" {{ builddir / '$variant-$version.toml' }}
+        sed -i "/<SSHPUBKEY>/d" {{ builddir }}/$variant-$version.toml
     fi
  
     # Load image into rootful podman-machine
@@ -457,9 +457,9 @@ build-disk $variant="" $version="" $registry="": start-machine
     echo $fq_name
  
     # Remove existing image, if it exists
-    if [ -f "{{ builddir /'disks/$variant-$version.img' }}" ]; then
-        echo Removing existing disk image {{ builddir /'disks/$variant-$version.img' }}
-        rm -f {{ builddir /'disks/$variant-$version.img' }}
+    if [ -f {{ builddir }}/disks/$variant-$version.img ]; then
+        echo "Removing existing disk image {{ builddir }}/disks/$variant-$version.img..."
+        rm -f {{ builddir }}/disks/$variant-$version.img
     fi
  
     if [[ ! -d {{ builddir }}/disks ]]; then
