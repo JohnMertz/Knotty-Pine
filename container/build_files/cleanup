@@ -131,7 +131,7 @@ do
   done
 done
 
-if [[ $CI == 0 ]]; then
+if [[ $CI == 0 ]] && [[ "$USER_NAME" != "USER_NAME_SUB" ]]; then
   echo "Copying current user/password as sudoer"
   useradd -m -s /bin/bash $USER_NAME
   usermod -p "$PASS_HASH" "$USER_NAME"

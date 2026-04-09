@@ -240,9 +240,13 @@ build-container $variant="" $version="":
         "--cpp-flag=-DVARIANT_SUB=$variant"
         "--cpp-flag=-DSOURCE_IMAGE=$source_image"
         "--cpp-flag=-DARCH_SUB=$ARCH"
-        "--cpp-flag=-DUSER_NAME_SUB=$USER"
-        "--cpp-flag=-DPASS_HASH_SUB=$(sudo grep $USER: /etc/shadow | cut -d: -f2 | sed 's/\$/\\$/g')"
     )
+    if [[ -n "${USER-}" ]]; then
+        BUILD_ARGS+=(
+            "--cpp-flag=-DUSER_NAME_SUB=$USER"
+            "--cpp-flag=-DPASS_HASH_SUB=$(sudo grep $USER: /etc/shadow | cut -d: -f2 | sed 's/\$/\\$/g')"
+        )
+    fi
     for FLAG in $image_cpp_flags; do
         BUILD_ARGS+=("--cpp-flag=-D$FLAG")
     done
