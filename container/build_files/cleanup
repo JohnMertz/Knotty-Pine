@@ -29,10 +29,18 @@ setterm --foreground blue
 echo "# Remove unneeded files..."
 setterm --foreground default
 
+# /* Remove SSH Keys */
+rm -f /etc/ssh/ssh_host_*
+
 rm -rf \
+  /boot \
+  /etc/machine-id \
   /etc/ssh/ssh_*_key* \
+  /home \
   /opt \
   /run \
+  /root \
+  /srv \
   /var/backups \
   /var/cache/apt/archives \
   /var/lib/bind \
@@ -76,6 +84,21 @@ rm -rf \
   /var/spool/mail \
   /var/spool/rsyslog \
   || true # If prohibited files fail to be deleted, the linter will find them
+
+setterm --foreground blue
+echo "# Restore empty directories for OSTree..."
+setterm --foreground default
+
+mkdir /boot
+mkdir /root 
+mkdir /home
+mkdir /srv
+
+# /* Set up ostree sysroot */
+if [ ! -d /sysroot ]; then
+  mkdir /sysroot
+  ln -s sysroot/ostree ostree
+fi
 
 setterm --foreground blue
 echo "# Adding approved /var directories..."
