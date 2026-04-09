@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: knotty-pine
+          - variant: desktop
             version: 13
     container:
       image: "ghcr.io/ublue-os/devcontainer:latest"
